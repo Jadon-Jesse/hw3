@@ -20,6 +20,10 @@
 /* Your final implementation should comment out this macro. */
 #define MM_USE_STUBS
 
+#define align4(x) (((((x)-1)>>2)<<2)+4)
+
+s_block_ptr findFirst(s_block_ptr * lastBlock, size_t size);
+
 
 struct rlimit limit;
 void *base = NULL;
@@ -48,7 +52,7 @@ printf("soft =%llu", (long long) limit.rlim_cur);
 #endif
 //return 0;*/
 
-    void *point;
+    /*void *point;
     point = sbrk(0);
 
     if(sbrk(size)== (void *) -1)
@@ -61,7 +65,50 @@ printf("soft =%llu", (long long) limit.rlim_cur);
      printf("%s\n", (char*) &point );
     }
 
-    return point;
+    return point;*/
+
+    s_block_ptr block, last;
+
+	size_t s;
+
+
+	s = align4 (size);
+
+	if (base) {
+	/* First find a block */
+	  last = base;
+	  block = findFirst (&last ,s);
+
+	  if (block) {
+	/* can we split */
+	    if ((block->size - s) >= ( BLOCK_SIZE + 4))
+	    split_block (block,s);
+
+	  block->free =0;
+	} 
+
+	else {
+	/* No fitting block , extend the heap */
+	  block = extend_heap (last ,s);
+
+	  if (!block)
+	    return (NULL );
+	  }
+
+	} 
+
+	else {
+	/* first time */
+	  block = extend_heap (NULL ,s);
+	
+	  if (!block)
+	    return (NULL );
+
+	  base = block;
+	}
+
+	return (block->data );
+
 }
 
 void* mm_realloc(void* ptr, size_t size)
@@ -106,6 +153,7 @@ s_block_ptr extend_heap (s_block_ptr last , size_t s)
 		return NULL;
 	}
 	block->size = s;
+	block->prev = last;
 	block->next = NULL;
 
 	if(last)
@@ -115,5 +163,20 @@ s_block_ptr extend_heap (s_block_ptr last , size_t s)
 	block->free = 0;
 
 	return block;
+
+}
+
+void split_block (s_block_ptr b, size_t s)
+{
+	s_block_ptr newBlock;
+
+	newBlock = b->data + s;
+	newBlock->size = b->size -s -BLOCK_SIZE;
+	newBlock->next = b->next;
+	newBlock->prev = b->prev;
+	newBlock->free = 1;
+
+	b->size = s;
+	b->next = newBlock;
 
 }
