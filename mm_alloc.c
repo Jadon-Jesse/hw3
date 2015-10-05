@@ -1,8 +1,14 @@
 /*
- * mm_alloc.c
- *
- * Stub implementations of the mm_* routines. Remove this comment and provide
- * a summary of your allocator's design here.
+  When the mm_malloc function is called,We traverse through the heap testing if the current
+  chunk of memory passed will fit in the ith position ... If it does then we simply return the first
+  address that it fits in, furthur more if the requested size is much smaller than the newly allocated block sze
+  then we split that block into the required size and mark the rest of the block as free... However If we do not 
+  find a firstFit then we extend our heap using sbrk by moving the brk and allocating a new block at the end of the 
+  list.
+  When the mm_free function is called we mark the passed block as free and if the passed block is at the end of our heap
+  we move the break back to the address of the previous block to release memory. We also try to prevent fragmantation by fusing 
+  empty neighbouring blocks where possible.
+  When the mm_realoc function is called we just use the shortcut method by calling mm_maloc and memcpy
  */
 
 #include "mm_alloc.h"
@@ -15,12 +21,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <string.h>
 
 
-/* Your final implementation should comment out this macro. */
-#define MM_USE_STUBS
-
-#define align4(x) (((((x)-1)>>2)<<2)+4)
 
 s_block_ptr findFirst(s_block_ptr * lastBlock, size_t size);
 
@@ -31,56 +34,20 @@ void *base = NULL;
 void* mm_malloc(size_t size)
 {
 
- 
-	/*
-#ifdef MM_USE_STUBS
-    return calloc(1, size);
-#else
-#error Not implemented.
-#endif
-
- 
-getrlimit(RLIMIT_DATA, &limit);
-
-
-printf("soft =%llu", (long long) limit.rlim_cur);
-
-#ifdef MM_USE_STUBS
-    return calloc(1, size);
-#else
-#error Not implemented.
-#endif
-//return 0;*/
-
-    /*void *point;
-    point = sbrk(0);
-
-    if(sbrk(size)== (void *) -1)
-    {
-    	printf("%s\n", "FAILED");
-    	return NULL;
-    }
-    else{
-     point=	sbrk(size);
-     printf("%s\n", (char*) &point );
-    }
-
-    return point;*/
-
     s_block_ptr block, last;
 
 	size_t s;
 
 
-	s = align4 (size);
+	s = size;
 
 	if (base) {
-	/* First find a block */
+
 	  last = base;
 	  block = findFirst (&last ,s);
 
 	  if (block) {
-	/* can we split */
+
 	    if ((block->size - s) >= ( BLOCK_SIZE + 4))
 	    split_block (block,s);
 
@@ -88,7 +55,7 @@ printf("soft =%llu", (long long) limit.rlim_cur);
 	} 
 
 	else {
-	/* No fitting block , extend the heap */
+
 	  block = extend_heap (last ,s);
 
 	  if (!block)
@@ -98,7 +65,7 @@ printf("soft =%llu", (long long) limit.rlim_cur);
 	} 
 
 	else {
-	/* first time */
+
 	  block = extend_heap (NULL ,s);
 	
 	  if (!block)
@@ -113,20 +80,41 @@ printf("soft =%llu", (long long) limit.rlim_cur);
 
 void* mm_realloc(void* ptr, size_t size)
 {
-#ifdef MM_USE_STUBS
-    return realloc(ptr, size);
-#else
-#error Not implemented.
-#endif
+	
+    void * re;
+    re = mm_malloc(size);
+    memcpy(re, ptr, size);
+
+    return re;
+
+
 }
 
 void mm_free(void* ptr)
 {
-#ifdef MM_USE_STUBS
-    free(ptr);
-#else
-#error Not implemented.
-#endif
+    s_block_ptr block;
+
+    block = get_block( ptr);
+    block->free = 1;
+
+    if( (block ->prev) && (block->prev->free=1) )
+    {
+    	block = fusion(block->prev);
+    }
+
+    if(block -> next)
+    {
+    	fusion(block);
+    }
+
+    else{
+    	if(block ->prev)
+    		block->prev->next = NULL;
+    	else
+    		base = NULL;
+
+    	brk(block);
+    }
 }
 
 
@@ -145,16 +133,22 @@ s_block_ptr findFirst(s_block_ptr * lastBlock, size_t size)
 
 s_block_ptr extend_heap (s_block_ptr last , size_t s)
 {
+	int status;
 	s_block_ptr block;
+
 	block = sbrk(0);
 
-	if(sbrk(BLOCK_SIZE + s) == (void *) -1)
+	status = (long)sbrk(BLOCK_SIZE + s);
+
+	if(status < 0)
 	{
 		return NULL;
 	}
+
 	block->size = s;
 	block->prev = last;
 	block->next = NULL;
+	block->ptr = block->data;
 
 	if(last)
 	{
@@ -170,13 +164,47 @@ void split_block (s_block_ptr b, size_t s)
 {
 	s_block_ptr newBlock;
 
-	newBlock = b->data + s;
+	newBlock = (s_block_ptr) b->data + s;
 	newBlock->size = b->size -s -BLOCK_SIZE;
 	newBlock->next = b->next;
-	newBlock->prev = b->prev;
+	newBlock->prev = b;
 	newBlock->free = 1;
+	newBlock->ptr = newBlock->data;
 
 	b->size = s;
 	b->next = newBlock;
 
+	if(newBlock->next)
+	{
+		newBlock->next->prev = newBlock;
+	}
+
 }
+
+s_block_ptr fusion(s_block_ptr b)
+{
+  if( (b->next) && (b->next->free=1) )
+  {
+  	b->size = b->size + BLOCK_SIZE + b->next->size;
+  	b->next = b->next->next;
+
+  	if(b->next)
+  		b->next->prev = b;
+  }
+
+  return b;
+
+}
+
+s_block_ptr get_block (void *p)
+{
+	char *newAdd;
+	newAdd = p;
+
+	newAdd = newAdd - BLOCK_SIZE;
+
+	p = newAdd;
+
+	return p;
+}
+
